@@ -1,6 +1,7 @@
 /* Lua talks to JACK transport! Rad!
  *
  * Copyright (C) 2013 Chad Cassady <chad@beatboxchad.com>
+ *
  * Many thanks to this dude: https://github.com/x42/jack_midi_clock.  And also
  * to the super-badass JACK folks who provided this example:
  * http://jackit.sourceforge.net/cgi-bin/lxr/http/source/example-clients/showtime.c
@@ -29,6 +30,12 @@
  * This is an incomplete implementation, but it works, and that's amazing to
  * me. I will expand this to be a general-purpose interface to JACK from Lua,
  * but I can grab my BBT info now.
+ *
+ * TODO:
+ * - come up with a better name for the thing.
+ * - maybe rename the repo
+ * - add midi support
+ * - add to this list, because there's a lot to do.
  * 
  */
 
@@ -41,10 +48,8 @@
 #include <stdlib.h>
 #include <jack/jack.h>
 #include <jack/transport.h>
-//for lack of a better understanding on how to properly link things at compile time, I'm going to try the dynamic library open trick
-#include <dlfcn.h>
+#include <jack/midiport.h>
 
-//void *dlopen(const char *libjack, int RTLD_NOW); // this looks like it's maybe just a prototype.
 
 static jack_client_t *client; 	
 static jack_status_t *status;
@@ -59,13 +64,6 @@ static jack_status_t *status;
 // maybe I should have an init function that declares the client pointer
 
 static int showtime (lua_State *L) {
-	//jack_client_t *client;
-	//lua_gettable(L, LUA_REGISTRYINDEX);
-	//void client_addy = lua_gettop(L);
-	//client = &client_addy;
-
-	//lua_pushstring(L, "client_pointer");
-	//char *client_name = lua_tostring(L, 1);
 	static jack_position_t current; 
 	static jack_transport_state_t transport_state;
 	
@@ -104,7 +102,9 @@ static int showtime (lua_State *L) {
 		lua_pushnumber(L, current.bar);
 		lua_pushnumber(L, current.beat);
 		lua_pushnumber(L, current.tick);
-		num_arguments = num_arguments + 3;
+		lua_pushnumber(L, current.beats_per_bar);
+		lua_pushnumber(L, current.beat_type);
+		num_arguments = num_arguments + 5;
 	}
 	// I don't know what this is for yet, I only really care about BBT actually,
 	// but probably should include it.
@@ -125,7 +125,7 @@ void jack_shutdown (void *arg) {
 */
 
 
-static int become_a_client(lua_State *L) {
+static int client_init(lua_State *L) {
 	/* try to become a client of the JACK server */
 	char *client_name = lua_tostring(L, 1);
 	client = jack_client_open(client_name, 0, status);
@@ -166,7 +166,7 @@ int close_client
 
 static const struct luaL_Reg lua_jack [] = {
 	{"showtime", showtime},
-	{"become_a_client", become_a_client},
+	{"client_init", client_init},
 	{NULL, NULL}
 };
 

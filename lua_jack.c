@@ -28,17 +28,16 @@
  * but I can grab my BBT info now.
  *
  * TODO:
- * - come up with a better name for the thing.
- * - maybe rename the repo
- * - add midi support
- * - add to this list, because there's a lot to do.
+ * - add a process callback at the appropriate time
+ * - add midi support (in progress)
+ * - 
  * 
  */
 
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
-#include <errno.h>
+#include <errno.h> 
 #include <unistd.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -50,6 +49,35 @@
 static jack_client_t *client; 	
 static jack_status_t *status;
 static jack_port_t *midi_out;
+
+//static int process (jack_nframes_t nframes, void *arg) {
+
+/* so I'm asking JACK to call this when needed. So this function will change
+ * depending on what we're trying to do. Hmm. This stuff here from the
+ * simple_client JACK example is to copy the data from the input port to the
+ * output port, real simple:
+
+	jack_default_audio_sample_t *out = (jack_default_audio_sample_t *)
+	jack_port_get_buffer (output_port, nframes);
+	jack_default_audio_sample_t *in = (jack_default_audio_sample_t *) jack_port_get_buffer (input_port, nframes);
+	memcpy (out, in, sizeof (jack_default_audio_sample_t) * nframes);
+	return 0;      
+
+ * However, that's not what I have in mind right this second. Instead I have in
+ * mind writing MIDI data. But again, if this is going to be a general-purpose
+ * interface to JACK then I'm gonna end up with different needs depending on
+ * what we're trying to do from our Lua script. When we start doing audio
+ * stuff, then we're gonna end up doing those operations on the callback. And
+ * I'll have to figure out if I can put that all in one function, or register
+ * different ones based on what we're doing in Lua, whether we can process
+ * audio and MIDI data all at once. This could get quite complex.  I'm slightly
+ * overwhelmed by that, so to avoid analysis paralysis for now I'm just gonna
+ * put in code that gets the MIDI part done and refactor it later.
+*/
+
+	//process_midi_output(nframes);
+	
+//}
 
 static int showtime (lua_State *L) {
 	static jack_position_t current; 
@@ -113,7 +141,6 @@ static int open_client(lua_State *L) {
 	/* try to become a client of the JACK server */
 	char *client_name = lua_tostring(L, 1);
 	client = jack_client_open(client_name, 0, status);
-	jack_activate (client); // TODO add some error handling around this. 
 	return 1;
 };
 
@@ -125,17 +152,34 @@ static int close_client(lua_State *L) {
 // register an outbound MIDI port
 static int register_midi_out(lua_State *L) {
 	char *port_name = lua_tostring(L,1);
-	midi_out = jack_port_register(client, port_name, JACK_DEFAULT_MIDI_TYPE, JackPortIsTerminal, 2048);
+	midi_out = jack_port_register(client, port_name, JACK_DEFAULT_MIDI_TYPE, JackPortIsTerminal, 0);
 	return 0;
 };
 
 // write some data to that port. 
+
+//static int process_midi_output(lua_State *L) {
+
+//}
+
+	
+//static int process_callback(lua_State *L) {
+//	jack_set_process_callback(client, process, 0);
+//}
+	
+// after ports are up and running and such, tell JACK we're ready
+static int activate(lua_State *L) {
+	jack_activate (client); // TODO add some error handling around this. 
+	return 0;
+}
 
 static const struct luaL_Reg lua_jack [] = {
 	{"showtime", showtime},
 	{"open_client", open_client},
 	{"close_client", close_client},
 	{"register_midi_out", register_midi_out},
+	{"activate", activate},
+	//{"process", process},
 	{NULL, NULL}
 };
 

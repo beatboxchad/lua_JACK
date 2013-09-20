@@ -50,7 +50,85 @@ static jack_client_t *client;
 static jack_status_t *status;
 static jack_port_t *midi_out;
 
-//static int process (jack_nframes_t nframes, void *arg) {
+/* --- How I think I should implement the MIDI events ---
+ *
+ * I should create a global buffer I push MIDI events onto. queue_midi will do
+ * this. Then process() will take that buffer and pop off as many events as
+ * applicable within the nframes parameter. This means that my buffer
+ * (accessible to all funcitons) should have some sort of metadata about the
+ * timing of the MIDI events in terms of frames. Lua's gonna be doing it like,
+ * "right now" but that should be easy to translate to "what right now was
+ * right then" for each event. 
+ *
+ */
+
+static int queue_midi(lua_State *L) {
+
+/* for now, I'm going to send realtime messages every time the process callback
+ * is called. 
+ 
+ * This is probably not going to work for a sequencer, and I'm going to have to
+ * decide where to put the logic for that. I think that stuff belongs unexposed
+ * to Lua. I want to keep the actual lua interface simple and easy, and do all
+ * the number-crunching down here. Thinking of how that would ideally look:
+ * 
+ * Lua will schedule MIDI events passing down the raw MIDI data (that's okay
+ * with me for now, though it'd be nifty to make it more user-friendly in the
+ * future) and the BBT timeslot the event should take place in. Then, this
+ * module will translate the BBT passed into an actual frame time and push the
+ * message into a struct with the frame at which it should occur as a key.
+ * Maybe. Another approach may be better, but my C skills are still
+ * rudimentary. Maybe I should look at examples of how to create a real actual
+ * buffer.
+
+ * Anyway, after the message has been queued, the process callback will
+ * actually set up the buffer, pull relevant MIDI events from the struct for
+ * within nframes, and queue 'em up. Then it'll clean up the struct. Hey - how
+ * do I do that?
+
+ * QUESTION: Will this method of queing events be tolerant of a
+ * fluctuating tempo? JACK transport design does not take into account variable
+ * speed. Will we end up skipping frames? Will it sound like shit? TIME WILL
+ * TELL
+ * 
+ * Actually, although I can't find much on how quickly the process cycles go, I
+ * think I can just keep it to realtime MIDI messages. jack_midi_clock has some
+ * logic I will steal for this. 
+ */
+
+	// but before I get started with that, let's play around with some bit
+	// operations to queue up some MIDI events! yay!
+
+	uint8_t *buffer;
+	uint8_t status_byte;
+	uint8_t data_byte1;
+	uint8_t data_byte2;
+
+	// let's code with the assumption of notes. 3 bytes, a status followed by two
+	// data events. This does not include note-off. That will sound obnoxious.
+	// But I will not think of that right now.
+
+
+	//buffer = jack_midi_event_reserve(port_buf, 0, 3);
+	buffer = 0; // to get it to compile, this isn't done.
+	// this isn't going to work because this function can't be called back by
+	// JACK. It takes different arguments because it needs to talk to Lua.
+
+
+	status_byte = lua_tonumber(L, 1);
+	data_byte1 = lua_tonumber(L, 2);
+	data_byte2 = lua_tonumber(L, 3);
+	// int data = status_byte << 16 | data_byte1 << 8 | data_byte2; // I wonder if this is right. We'll find out.
+	// naw, I'll just do what the jack_midi_clock guy did.
+	if(buffer) {
+		buffer[0] = status_byte;
+		buffer[1] = data_byte1;
+		buffer[2] = data_byte2;
+	}
+	return 0;
+}
+
+static int process (jack_nframes_t nframes, void *arg) {
 
 /* so I'm asking JACK to call this when needed. So this function will change
  * depending on what we're trying to do. Hmm. This stuff here from the
@@ -73,11 +151,35 @@ static jack_port_t *midi_out;
  * audio and MIDI data all at once. This could get quite complex.  I'm slightly
  * overwhelmed by that, so to avoid analysis paralysis for now I'm just gonna
  * put in code that gets the MIDI part done and refactor it later.
+ *
 */
 
+  /* here's a port buffer we'll need, from midi_out */
+  void* port_buf = jack_port_get_buffer(midi_out, nframes);
+
+  /* prepare MIDI buffer */
+  jack_midi_clear_buffer(port_buf);
+
+	/* I will need to figure out how many frames nframes is, and if there will be
+	 * a need for me to readahead. The Lua midi sequencer is built in such a way
+	 * that it sends realtime messages by comparing what beat we're on. Perhaps
+	 * an inprocess client is the way to go to circumvent that whole issue.
+	 * Although I'm amidst considering another aspect of the same problem in
+	 * sequencer.lua
+	*/
+
 	//process_midi_output(nframes);
+  return 0;
 	
-//}
+}
+
+
+static int showframe (lua_State *L) {
+	static jack_position_t current; 
+	lua_pushnumber(L, current.frame);
+	return 1;
+
+}
 
 static int showtime (lua_State *L) {
 	static jack_position_t current; 
@@ -158,14 +260,12 @@ static int register_midi_out(lua_State *L) {
 
 // write some data to that port. 
 
-//static int process_midi_output(lua_State *L) {
-
-//}
 
 	
-//static int process_callback(lua_State *L) {
-//	jack_set_process_callback(client, process, 0);
-//}
+static int process_callback(lua_State *L) {
+	jack_set_process_callback(client, process, 0);
+	return 0;
+}
 	
 // after ports are up and running and such, tell JACK we're ready
 static int activate(lua_State *L) {
@@ -175,11 +275,13 @@ static int activate(lua_State *L) {
 
 static const struct luaL_Reg lua_jack [] = {
 	{"showtime", showtime},
+	{"showframe", showframe},
 	{"open_client", open_client},
 	{"close_client", close_client},
 	{"register_midi_out", register_midi_out},
 	{"activate", activate},
-	//{"process", process},
+	{"process_callback", process_callback},
+	{"queue_midi", queue_midi},
 	{NULL, NULL}
 };
 
